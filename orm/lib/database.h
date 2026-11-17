@@ -21,6 +21,11 @@
 #include <QStringList>
 #include <QThread>
 #include <QUuid>
+#include <QUrl>
+#include <QTime>
+#include <QDateTime>
+#include <QDate>
+#include <type_traits>
 
 #include "connection.h"
 #include "field.h"
@@ -29,6 +34,34 @@
 #include "insert.h"
 #include "select.h"
 #include "update.h"
+
+namespace orm {
+
+template <typename T>
+constexpr const char* sqlTypeName(void)
+{
+    using cleanDataType = std::decay_t<T>;
+
+    if constexpr (std::is_integral_v<cleanDataType> || std::is_enum_v<cleanDataType>) {
+        return "INTEGER";
+    } else if constexpr (std::is_floating_point_v<cleanDataType>) {
+        return "REAL";
+    } else if constexpr (std::is_same_v<cleanDataType, QString> ||
+                         std::is_same_v<cleanDataType, QUrl> ||
+                         std::is_same_v<cleanDataType, QUuid> ||
+                         std::is_same_v<cleanDataType, QDateTime> ||
+                         std::is_same_v<cleanDataType, QDate> ||
+                         std::is_same_v<cleanDataType, QTime>) {
+        // Строки и типы, сериализуемые в ISO-строку
+        return "TEXT";
+    } else if constexpr (std::is_same_v<cleanDataType, QByteArray>) {
+        return "BLOB";
+    } else {
+        static_assert(sizeof(cleanDataType) == 0, "Unsupported C++ type for SQL mapping");
+    }
+}
+
+} // namespace orm
 
 class DataBase
 {
@@ -77,6 +110,7 @@ public:
             m_connectionName.clear();
             return false;
         }
+
         return true;
     }
 
@@ -137,6 +171,51 @@ public:
 
     template<typename Table>
     SqlSelectQuery<Table> from(void) { return SqlSelectQuery<Table>(m_db, m_overlay); }
+
+    template<typename Table>
+    bool createDBStruct()
+    {
+        if (!m_db.isOpen()) {
+            m_lastError = QStringLiteral("соединение не открыто: вызовите connect() перед createDBStruct()");
+            ORM_ERROR_LOG(m_lastError);
+            return false;
+        }
+
+        const QStringList columns = Table::fields_type::columns();
+        const QStringList columnTypes = Table::fields_type::columnTypes();
+        if (columns.size() != columnTypes.size()) {
+            m_lastError = QStringLiteral("колонок %1, типов %2")
+                              .arg(columns.size()).arg(columnTypes.size());
+            ORM_ERROR_LOG(m_lastError);
+            return false;
+        }
+
+        QStringList sqlRows;
+        for (int i = 0; i < columns.size(); ++i) {
+            sqlRows << QStringLiteral("\"%1\" %2").arg(quoted(columns[i]), columnTypes[i]);
+        }
+
+        const QStringList key = orm::PrimaryKey<Table>::columns();
+        if (!key.isEmpty()) {
+            QStringList keyColumns;
+            for (const QString& column : key) {
+                keyColumns << QStringLiteral("\"%1\"").arg(quoted(column));
+            }
+            sqlRows << QStringLiteral("PRIMARY KEY (%1)").arg(keyColumns.join(QStringLiteral(", ")));
+        }
+
+        const QString sql = QStringLiteral("CREATE TABLE IF NOT EXISTS \"%1\" (%2)")
+                                .arg(quoted(QString::fromLatin1(Table::table_name)),
+                                     sqlRows.join(QStringLiteral(", ")));
+
+        QSqlQuery query(m_db);
+        if (!query.exec(sql)) {
+            m_lastError = query.lastError().text();
+            ORM_ERROR_LOG(m_lastError);
+            return false;
+        }
+        return true;
+    }
 
     template<typename Table>
     SqlInsertQuery<Table> into(void) { return SqlInsertQuery<Table>(m_db, m_overlay); }

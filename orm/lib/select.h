@@ -124,6 +124,40 @@ public:
         return *this;
     }
 
+    template<typename Type>
+    SqlSelectQuery& order(const Field<Table, Type>& field)
+    {
+        m_orderedList.append(field.columnName);
+        return *this;
+    }
+
+    template<typename... Types>
+    SqlSelectQuery& order(const Field<Table, Types>&... fields)
+    {
+        (order(fields), ...);
+        return *this;
+    }
+
+    SqlSelectQuery& order(const FieldMeta<Table>& field)
+    {
+        m_orderedList.append(field.columnName);
+        return *this;
+    }
+
+    SqlSelectQuery& order(const QString& columnName)
+    {
+        m_orderedList.append(columnName);
+        return *this;
+    }
+
+    template<typename... Args>
+    SqlSelectQuery& order(const QString& first, const Args&... args)
+    {
+        order(first);
+        (order(QString(args)), ...);
+        return *this;
+    }
+
     SqlSelectQuery& limit(int count)  { m_limit = count;  return *this; }
     SqlSelectQuery& offset(int count) { m_offset = count; return *this; }
 
@@ -289,7 +323,6 @@ private:
                 return field.isText;
             }
         }
-
         // если не нашли колонку - значит тектовое поле
         return true;
     }
@@ -305,14 +338,17 @@ private:
         const QString prefix = QStringLiteral("p");
 
         QString sql = QStringLiteral("SELECT %1 FROM %2")
-                // Table::table_name имеет тип const char*
-                // чтобы привести к QString есть функция QLatin1String
                 .arg(selectedColumns(), QLatin1String(Table::table_name));
 
         const QString where = whereExpression(prefix);
         if (!where.isEmpty()) {
             sql += QStringLiteral(" WHERE ") + where;
         }
+
+        if (!m_orderedList.isEmpty()) {
+            sql += QLatin1String(" ORDER BY ") + m_orderedList.join(QLatin1String(", "));
+        }
+
         sql += limitOffset();
 
         if (!prepare(query, sql)) {
@@ -393,6 +429,10 @@ private:
         sql += QStringLiteral("NOT EXISTS (SELECT 1 FROM %1 AS u WHERE %2)")
                    .arg(local, keyMatch.join(QStringLiteral(" AND ")));
 
+        if (!m_orderedList.isEmpty()) {
+            sql += QLatin1String(" ORDER BY ") + m_orderedList.join(QLatin1String(", "));
+        }
+
         sql += limitOffset();
 
         if (!prepare(query, sql)) {
@@ -406,6 +446,7 @@ private:
     QSqlDatabase m_db;
     QList<ColumnBinding> m_columnList;
     QList<Condition> m_conditionList;
+    QList<QString> m_orderedList;
     Overlay m_overlay;
 
     int m_limit  = -1;

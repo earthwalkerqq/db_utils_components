@@ -11,16 +11,6 @@
  *   - имя колонки в columns()         "KOD_ICAO"
  *   - элемент meta() с set/get        для QML, INSERT и UPDATE объекта
  *   - элемент кортежа all()           когда нужен тип поля без накладных расходов
- *
- * Имя колонки, имя члена и его тип указаны ровно один раз и разойтись
- * между собой не могут.
- *
- * ВАЖНО для QML: макрос НЕ порождает Q_GADGET и Q_PROPERTY намеренно.
- * CMake AUTOMOC решает, запускать ли moc, текстовым поиском строки
- * "Q_GADGET" в файле — после макроса её там нет, метаобъект не собрался бы.
- * Вместо этого объект отдаётся в QML как QVariantMap
- * (более подробно описано в ./qml.h):
- * для QML это обычный JS-объект. В таком случае moc не нужен
  */
 
 #include <tuple>
@@ -33,6 +23,7 @@
 #include <QStringList>
 #include <QVariant>
 
+#include "database.h"
 #include "field.h"
 #include "log.h"
 
@@ -110,6 +101,10 @@ T readColumn(const Q& q, const QSqlRecord& record, const QString& column,
 #define ORM_DETAIL_COLUMN(T, name, column)                                     \
     result.append(QStringLiteral(column));
 
+// для перевода типов данных CPP -> SQL
+#define ORM_DETAIL_COLUMN_DATATYPE(T, name, column)                            \
+    result.append(QString::fromLatin1(orm::sqlTypeName<T>()));
+
 // элемент рантайм-списка meta(): T запечатан внутри лямбд
 #define ORM_DETAIL_META(T, name, column)                                       \
     result.append(FieldMeta<Self>{                                             \
@@ -168,6 +163,12 @@ T readColumn(const Q& q, const QSqlRecord& record, const QString& column,
         static QStringList columns() {                                         \
             QStringList result;                                                \
             FIELD_LIST(ORM_DETAIL_COLUMN)                                      \
+            return result;                                                     \
+        }                                                                      \
+                                                                               \
+        static QStringList columnTypes() {                                     \
+            QStringList result;                                                \
+            FIELD_LIST(ORM_DETAIL_COLUMN_DATATYPE)                             \
             return result;                                                     \
         }                                                                      \
                                                                                \
